@@ -48,7 +48,7 @@ Y: a response vector with sample size n
 
 ratio: a sample spitting ratio value taking values from 0 to 1. Default value is 2/3.
 
-k: the repeat times of sample-splitting, default setting is 5.
+K: the repeat times of sample-splitting, default setting is 5.
 
 return: a list including the omics feature selection result at the different FDR levels.
 
