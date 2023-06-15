@@ -54,7 +54,7 @@ return: a list including the omics feature selection result at the different FDR
 
 ######################################################################################
 
-Step 1： install the packages SDEDDL by using the two different packages "SDEDDL_1.0.2.zip"  or "SDEDDL_1.0.2.tar.gz".
+Step 1： install the packages SDEDDL by using the packages "SDEDDL_1.0.2.zip"  for windows or "SDEDDL_1.0.2.tar.gz" for mac.
 
 Step 2: library(SDEDDL)
 
