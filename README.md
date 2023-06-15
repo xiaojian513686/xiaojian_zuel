@@ -1,8 +1,9 @@
-You can  download the two different environment packages "SDEDDL_1.0.2.zip"  and "SDEDDL_1.0.2.tar.gz".
-We illustrate the usage of the package "SDEDDL" by an example.
+You can  download the two different environment packages "SDEDDL_1.0.2.zip"  and "SDEDDL_1.0.2.tar.gz",
+then we illustrate the usage of the package "SDEDDL" by an example.
 
 
 # SDEDDL
+
 The packages published by Jian  Xiao.
 
 Package: SDEDDL, spectral deconfounding estimation SDE and Doubly Debiased Lasso (DDL)
@@ -17,7 +18,9 @@ Published: 2023-06-11
 
 Author: Jian Xiao and Shaoting Li
 
-Maintainer: Jian Xiao<xiaoj771@sina.com>
+Maintainer: Jian Xiao
+
+<xiaoj771@sina.com>
 
 License: Zhongnan University of Economics and Law
 
