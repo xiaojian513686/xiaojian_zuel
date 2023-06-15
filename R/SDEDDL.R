@@ -1,0 +1,240 @@
+#' @Title Based on MCP-penalty spertral deconfounding estimation
+#' @describtion Estimate the unknown coefficients parameters for high-dimensional confounding model
+#' @param  X: a n X p matrix, n denotes sample size; p denotes the number of omics features
+#' @param  Y: a response vector with sample size n
+#' @param  id: a parameter, id=0 denotes input X is a matrix, otherwise id=1 denotes input X is a nX1 matrix
+#' @return a list including the coefficients estimators
+#' @export
+
+spertral_deconfounding_estimation_MCP <- function (X, Y, id = 0)
+{
+  UDV_list = svd(X)
+  U = UDV_list$u
+  D = UDV_list$d
+  V = t(UDV_list$v)
+  tau = quantile(D, rho=0.5)["50%"]
+  Dtilde = pmin(D, rep(tau, length(D)))
+  if (id == 1)
+  {
+    Q = diag(length(X))
+  } else {
+    Q = diag(nrow(X)) - U %*% diag(1 - Dtilde/D) %*% t(U)
+  }
+  Xtilde = Q %*%  X
+  Ytilde = Q %*%  Y
+   fit2 <- ncvreg::cv.ncvreg(Xtilde, Ytilde, family = "gaussian" )
+   fit.mcp <- fit2$fit
+   beta.fit2 <- fit.mcp$beta[ , fit2$min][-1] # 提取参数的估计值
+   return_listcoeff = list(betahat = beta.fit2)
+  return(return_listcoeff)
+}
+
+
+#' @Title Spertral deconfounding orinary least square (OLS) estimation
+#' @describtion Estimate the unknown coefficients parameters for low-dimensional confounding model
+#' @param  X: a n X p matrix, n denotes sample size; p denotes the number of omics features
+#' @param  Y: a response vector with sample size n
+#' @param  id: a parameter, id=0 denotes input X is a matrix, otherwise id=1 denotes input X is a nX1 matrix
+#' @return a list including the omics feature selection result at the different FDR levels.
+#' @export
+#'
+
+
+spertral_deconfounding_estimation_OLS <- function (X, Y, id=0)
+{
+  UDV_list = svd(X)
+  U = UDV_list$u
+  D = UDV_list$d
+  V = t(UDV_list$v)
+  tau = quantile(D, rho=0.5)["50%"]
+  Dtilde = pmin(D, rep(tau, length(D)))
+  if (id == 1)
+  {
+    Q = diag(length(X))
+  } else {
+    Q = diag(nrow(X)) - U %*% diag(1 - Dtilde/D) %*% t(U)
+  }
+  Xtilde = Q  %*% X
+  Ytilde = Q  %*% Y
+
+  fit = lm(Ytilde ~ Xtilde)
+  betahat = coef(fit)[-1]
+  betase = summary(fit)$coefficients[, 2][-1]
+  return_listcoeff = list(betahat = betahat, betase = betase)
+  return(return_listcoeff)
+}
+
+
+
+#' @Title  FDR controlled omics feature selection method by spertral deconfounding estimation (SDE) and double diabased lasso estimation method (DDL)
+#' @describtion Estimate the unknown coefficients parameters for low-dimensional confounding model
+#' @param  X: a n X p matrix, n denotes sample size; p denotes the number of omics features
+#' @param  Y: a response vector with sample size n
+#' @param  ratio: a sample spitting ratio value taking values from 0 to 1. Default value is 2/3.
+#' @return a list including the coefficients estimators (betahat) and their standard errors (betase)
+#' @export
+#' @examples
+#'  index = c(1,2,10)
+#'  n=100
+#'  p=200
+#'  s=5
+#'  q=3
+#'  sigmaE=2
+#'  sigma=2
+#'  pert=1
+#'  H = pert*matrix(rnorm(n*q,mean=0,sd=1),n,q,byrow = TRUE)
+#'  Gamma = matrix(rnorm(q*p,mean=0,sd=1),q,p,byrow = TRUE)
+#'  #value of X independent from H
+#'  E = matrix(rnorm(n*p,mean=0,sd=sigmaE),n,p,byrow = TRUE)
+#'  #defined in eq. (2), high-dimensional measured covariates
+#'  X = E + H %*% Gamma
+#'  delta = matrix(rnorm(q*1,mean=0,sd=1),q,1,byrow = TRUE)
+#'  #px1 matrix, creates beta with 1s in the first s entries and the remaining p-s as 0s
+#'  beta = matrix(rep(c(1,0),times = c(s,p-s)),p,1,byrow = TRUE)
+#'  #nx1 matrix with values of mean 0 and SD of sigma, error in Y independent of X
+#'  nu = matrix(rnorm(n*1,mean=0,sd=sigma),n,1,byrow = TRUE)
+#'  #eq. (1), the response of the Structural Equation Model
+#'  Y = X %*% beta + H %*% delta + nu
+#'  result = SDEDDL(X, Y)
+#'  summary(result)
+
+
+SDEDDL <-  function(X, Y,  ratio = 2/3,  fdrlevel = c(0.05,0.1), K = 5)
+{
+  library(DDL)
+  library(ncverg)
+  library(MASS)
+  n = dim(X)[1]; p = dim(X)[2]
+  X = scale(X, center = T, scale = T)
+  Y = scale(Y, center = T, scale = T)
+  #########################################################
+  obj_all <- list()
+  obj_all <- spertral_deconfounding_estimation_MCP(X = X, Y = Y, id = 0)
+  betahat_all <- obj_all$betahat;
+  index_sta00 <- which(betahat_all != 0)
+  if (length(index_sta00)==0)
+  {
+    re <- matrix(0, p, length(fdrlevel))
+    for (l in 1: length(fdrlevel))
+    {
+      re[, l] <- 0
+    }
+  } else {
+    Ir <-  array(NA, c(p, K, length(fdrlevel)))
+    for (ii  in 1: K)
+    {
+      #####splitting sample data
+      n1 <-  round(ratio*n); n_index <- sample(1: n); n1_index <- n_index[1: n1]
+      obj1 <- spertral_deconfounding_estimation_MCP(X[n1_index,  ], Y = Y[n1_index], id = 0)
+      T1 <-  obj1$betahat[which(obj1$betahat != 0)];
+      index_sta <- NULL
+      index_sta <- which(obj1$betahat != 0)
+      if (length(index_sta) == 0) {
+        Ir[, ii,] <-  0
+      } else if ((length(index_sta) <= 2)) {
+        if (length(index_sta) == 1)
+        { obj2 <-  spertral_deconfounding_estimation_OLS(X =  X[-n1_index, index_sta], id = 1, Y = Y[-n1_index])
+        } else {
+          obj2 <-  spertral_deconfounding_estimation_OLS(X =  X[-n1_index, index_sta], id = 0, Y = Y[-n1_index])
+        }
+        T2 <-  obj2$betahat; se2 <- obj2$betase
+        T2[is.na(T2)]  <- 0
+        se2[is.na(se2)]  <- 1
+        Tstat_guodu <- (T2/(se2)) * (T1/(se2))
+        Tstat <- Tstat_guodu
+        #############################fdr
+        cutoff <- sort(abs(Tstat))
+        for (l in 1: length(fdrlevel))
+        {
+          sum_fenmu <- sum_fenzi <- 0
+          t <- NA
+          for (i in 1: length(cutoff))
+          {
+            sum_fenzi <- sum(Tstat < -1*cutoff[i])
+            sum_fenmu <- sum(Tstat > cutoff[i])
+            a <-(sum_fenzi)/max(sum_fenmu,1)
+            if (a <= fdrlevel[l])
+            {
+              t <- cutoff[i]
+              break
+            }
+          }
+          selection_result <- Tstat  >= t; result <- rep(0,  p)
+          if (length(selection_result)!=0){
+            result[index_sta[which(selection_result==TRUE)]] <-  1
+          } else { result <-  rep(0, p)}
+          Ir[, ii, l] <-  result  #which(result!=0)
+        }
+      } else  {
+        obj2 <- DDL(X = X[-n1_index, ], Y = Y[-n1_index], index =  index_sta)
+      }
+        T2  <-  obj2$est_ddl; se2 <- obj2$se
+        T2[is.na(T2)]  <- 0
+        se2[is.na(se2)]  <- 1
+        Tstat <- (T2/(se2)) * (T1/(se2))
+        #############################fdr
+        cutoff <- sort(abs(Tstat))
+        for (l in 1: length(fdrlevel))
+        {
+          sum_fenmu <- sum_fenzi <- 0
+          t <- NA
+          for (i in 1: length(cutoff))
+          {
+            sum_fenzi <- sum(Tstat <= -1*cutoff[i])
+            sum_fenmu <- sum(Tstat >= cutoff[i])
+            a <-(sum_fenzi)/max(sum_fenmu,1)
+            if (a <= fdrlevel[l])
+            {
+              t <- cutoff[i]
+              break
+            }
+          }
+          selection_result <- Tstat  >= t; result <- rep(0,  p)
+          if (length(selection_result)!=0){
+            result[index_sta[which(selection_result==TRUE)]] <-  1
+          } else { result <-  rep(0, p)}
+          Ir[, ii, l] <-  result
+        }
+    }
+      ####################
+      Irate <- matrix(NA, p, length(fdrlevel))
+      length_value <- matrix(NA, K, length(fdrlevel))
+      for (l in 1: length(fdrlevel))
+      {
+        for (i in 1 : p)
+        {
+          Irate[i, l] <- sum(Ir[i, , l])/K
+        }
+        for (i in 1 : K)
+        {
+          length_value[i, l] <- length(which(Ir[, i, l]!=0))
+        }
+      }
+      mean_value  <- rep(NA, length(fdrlevel))
+      for (l in 1: length(fdrlevel))
+      {mean_value[l]  <-  median(length_value[, l])}
+      re <- matrix(0, p, length(fdrlevel))
+      for (l in 1: length(fdrlevel))
+      {
+        result_final <- order(Irate[,l], decreasing = TRUE)[1: mean_value[l]]
+        re[result_final,l] <- 1
+      }
+    }
+  colnames(re) <- as.character(fdrlevel)
+  return(list(result = re))
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

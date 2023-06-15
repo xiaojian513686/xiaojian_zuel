@@ -1,0 +1,13 @@
+Package: SDEDDL
+Type: Package
+Title: SDEDDL: spectral deconfounding estimation (SDE) estimation and Doubly Debiased Lasso (DDL) estimation
+Version: 1.0.2
+Imports: ncvreg, DDL, Matrix, MASS
+Published: 2023-06-11
+Maintainer: Jian Xiao<xiaoj771@sina.com>
+Author: Jian Xiao, Shaoting Li
+Description: a novel FDR controlled latent confounders-adjusted feature selection framework for omics-wide complex association studies.
+License: Zhongnan University of Economics and Law
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.2.3

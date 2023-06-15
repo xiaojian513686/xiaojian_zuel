@@ -1,0 +1,70 @@
+library(knockoff)
+library(glmnet)
+#library(MethylCapSig)
+library(GUniFrac)
+library(energy)
+library(dirmult)
+#install.packages("MethylCapSig")
+source("D:/lunwen/lunwen_all/SDE_DDL/methods/MXKF/functionsCKF.R")
+
+MXKF <- function(X.tr,Y.tr, FDR)
+  {
+     X <- X.tr
+    ########## screening #########
+     result <- matrix(0,  ncol(X), length(FDR))
+     
+     for (l in  1: length(FDR))
+     { 
+      kfp = knockoff.filter(X=X,y=Y.tr, fdr = FDR[l], statistic = stat.glmnet_lambdasmax, offset = 1)
+      kfStat = kfp$statistic
+      t = knockoff.threshold(kfStat, fdr = FDR[l], offset = 0)
+      kfSelect = sort(which(kfStat >= t))
+
+      select <-  kfSelect
+      
+      result[select, l] <- 1
+}
+      return(list(result = result))
+
+  }
+######=====================================================================================
+MXKF_evalution <-  function(Beta_true, X.tr, Y.tr, FDR=0.1)  {
+
+  # Beta_true=Beta_true; X.tr=X; Y.tr=y; fdrlevel=0.1
+
+  cv.obj.list <- list()
+  cv.obj.list <-  MXKF(X.tr=X.tr,  Y.tr=Y.tr, FDR=FDR)
+  
+  selection_result <- cv.obj.list$result
+  
+  FDR1 <- power1 <- matrix(NA, 1, length(FDR))
+  colnames(selection_result)  <- colnames(FDR1)  <- colnames(power1) <- as.character(FDR)
+  
+  if (length(Beta_true)!=0)
+  {
+    if (length(which(selection_result!=0))!=0)
+    {
+      for (l  in  1: length(FDR))
+      {
+        power1[1,l] <-length(which(selection_result[which(Beta_true!=0), l]!=0))/length(which(Beta_true!=0))
+        FDR1[1,l] <-length(which(selection_result[which(Beta_true==0), l]!=0))/max(length(which(selection_result[,l]!=0)),1)
+      }
+    } else {
+      for (l  in  1: length(FDR))
+      {
+        power1[1,l] <-length(which(selection_result[which(Beta_true!=0), l]!=0))/length(which(Beta_true!=0))
+        FDR1[1,l] <-length(which(selection_result[which(Beta_true==0), l]!=0))/max(length(which(selection_result[,l]!=0)),1)
+      }
+    }
+    
+  } else {
+    for (l  in  1: length(FDR))
+    {
+      FDR1[1,l]  <- power1[1,l] <- NA
+    }
+  }
+  
+  
+  return(list(selection_result = selection_result, 	FDR1 =	FDR1, power1=power1))
+
+}

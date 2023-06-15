@@ -1,0 +1,189 @@
+library(tidyverse)
+library(trac)
+library(ade4)
+library(jsonlite)
+library(reticulate)
+library(vctrs)
+library(rlang)
+library(BiocManager)
+library(ape)
+library(phyloseq)
+###### Source the different methods
+source("D:/lunwen/lunwen_all//SDE_DDL/methods/SDE_DDL000.R")
+source("D:/lunwen/lunwen_all//SDE_DDL/methods/SDE.R")
+source("D:/lunwen/lunwen_all//SDE_DDL/methods/MXKF/KF.R")
+methods <- c("CL", "RLCR", "BH", "MXKF")
+length_w <- 15
+FDR_levels <- seq(0, 0.2, length=length_w)
+###############################
+tax_table_to_phlyo <- function (x, data = parent.frame(), collapse = TRUE) {
+  err <- "Formula must be of the kind ~A1/A2/.../An."
+  if (any(lapply(data, class) != "factor"))
+    stop("Every column of data must be a factor.")
+  if (length(x) != 2)
+    stop(err)
+  if (x[[1]] != "~")
+    stop(err)
+  f <- x[[2]]
+  taxo <- list()
+  while (length(f) == 3) {
+    if (f[[1]] != "/")
+      stop(err)
+    f3.txt <- deparse(f[[3]])
+    if (!is.factor(data[[f3.txt]]))
+      stop(paste("Variable", f3.txt, "must be a factor"))
+    taxo[[f3.txt]] <- data[[f3.txt]]
+    if (length(f) > 1)
+      f <- f[[2]]
+  }
+  f.txt <- deparse(f)
+  if (!is.factor(data[[f.txt]]))
+    stop(paste("Variable", f.txt, "must be a factor."))
+  taxo[[f.txt]] <- data[[f.txt]]
+  taxo.data <- as.data.frame(taxo)
+  leaves.names <- as.character(taxo.data[, 1])
+  taxo.data[, 1] <- 1:nrow(taxo.data)
+  f.rec <- function(subtaxo) {
+    u <- ncol(subtaxo)
+    levels <- unique(subtaxo[, u])
+    if (u == 1) {
+      if (length(levels) != nrow(subtaxo))
+        warning("leaves names are not unique.")
+      return(as.character(subtaxo[, 1]))
+    }
+    t <- character(length(levels))
+    for (l in 1:length(levels)) {
+      x <- f.rec(subtaxo[subtaxo[, u] == levels[l], ][1:(u-1)])
+      t[l] <- paste0("(", paste(x, collapse = ","), ")", "'", levels[l], "'")
+    }
+    t
+  }
+  string <- paste0(f.rec(taxo.data), ";")
+  #string <- paste0("(", paste(f.rec(taxo.data), collapse = ","), ");")
+  phy <- ape::read.tree(text = string)
+  if (collapse)
+    phy <- ape::collapse.singles(phy)
+  phy$tip.label <- leaves.names[as.numeric(phy$tip.label)]
+  phy
+}
+
+#' Convert from phylo to the A matrix used in trac.  Note this is similar to
+#' the A used in rare, but with the column of all ones (for the root) removed
+
+phylo_to_A <- function(phy) {
+  nleaves <- length(phy$tip.label)
+  g <- igraph::graph_from_edgelist(phy$edge,
+                                   directed = TRUE)
+  igraph::V(g)$name <- c(phy$tip.label, phy$node.label)
+  num_nodes <- length(igraph::V(g))
+  A <- cbind(Matrix::Diagonal(nleaves),
+             Matrix::Matrix(0, nleaves, num_nodes - nleaves))
+  for (i in seq(nleaves + 1, num_nodes)) {
+    # for all nonleaf nodes
+    leaves_of_i <- intersect(igraph::subcomponent(g, mode = "out", v = i),
+                             1:nleaves)
+    A[leaves_of_i, i] <- 1
+  }
+  A[, seq(nleaves + 1, num_nodes)] <- A[, rev(seq(nleaves + 1, num_nodes))]
+  rownames(A) <- phy$tip.label
+  colnames(A) <- c(phy$tip.label, rev(phy$node.label))
+  A[, -ncol(A)] # remove the root, which is the rightmost column
+}
+
+
+# Data provided as phyloseq object by Rivera-Pinto (personal communication)
+
+load("D:/lunwen/lunwen_all/SDE_DDL/trac-reproducible-main/sCD14_HIV/original/Data_HIV.RData")
+# Less extreme filtering compared to J. Rivera-Pinto (see procSCD14.R)
+
+# Build a filter (at OTU level)
+filter.OTU <- genefilter_sample(x, filterfun_sample(function(x) x >= 1),
+                                A = 0.1 * nsamples(x))
+# Apply filter
+x.filter <- prune_taxa(filter.OTU, x)
+tax <- x.filter@tax_table@.Data
+
+# replace "unclassified" with the appropriate blank tag
+blank <- paste0(c("k", "p", "c", "o", "f", "g"), "__")
+for (i in 1:6) tax[tax[, i] == "unclassified", i] <- blank[i]
+
+# add an OTU column
+tax <- cbind(tax, rownames(tax))
+colnames(tax)[7] <- "OTU"
+
+# make it so labels are unique
+for (i in seq(2, 6)) {
+  # add a number when the type is unknown... e.g. "g__"
+  ii <- nchar(tax[, i]) == 3
+  if (sum(ii) > 0)
+    tax[ii, i] <- paste0(tax[ii, i], 1:sum(ii))
+}
+
+# add a root node that combines the three kingdoms into a tree:
+tax <- as.data.frame(tax)
+tax$Rank0 <- rep("Life", nrow(tax))
+tax <- tax[, c(8, 1:7)]
+
+# cumulative labels are harder to read but easier to work with:
+for (i in 2:ncol(tax)) {
+  tax[, i] <- paste(tax[, i-1], tax[, i], sep = "::")
+}
+# convert all columns from character to factors for tax_table_to_phylo
+for (i in seq_along(tax)) tax[, i] <- factor(tax[, i])
+
+
+# form phylo object:
+tree1 <- tax_table_to_phlyo(~Rank0/Kingdom/Phylum/Class/Order/Family/Genus/OTU,
+                            data = tax, collapse = TRUE)
+
+# convert this to an A matrix to be used for aggregation:
+A <- phylo_to_A(tree1)
+y <- sample_data(x.filter)$sCD14
+yy <- as.numeric(levels(y))[y]
+imiss <- which(is.na(yy)) # four samples have missing sCD14
+# we have n = 152 samples whereas paper has only 151 for some reason.
+dat <- list(y = yy[-imiss],
+            x = t(x.filter@otu_table@.Data[, -imiss]),
+            tree = tree1,
+            tax = tax,
+            A = A)
+dat$x <- dat$x[, match(str_match(rownames(A), "::([^:]+)$")[,2],
+                       colnames(dat$x))]
+identical(str_match(rownames(A), "::([^:]+)$")[,2],
+          colnames(dat$x))
+saveRDS(dat, file = "D:/lunwen/lunwen_all/SDE_DDL/trac-reproducible-main/sCD14_HIV/original/sCD14.RDS")
+########################################
+dim(dat$x)
+otu.tab <- dat$x
+otu.tab <- otu.tab + 1
+otu.prop <- otu.tab / rowSums(otu.tab)
+otu.composition <- otu.prop
+dim(otu.composition)
+X <- log(otu.composition)
+X_trans <- scale(X, center=TRUE, scale=TRUE)
+dim(X_trans)
+y_trans <- scale(dat$y, center=TRUE, scale=TRUE)
+hist(y_trans)
+# analysis:
+res.a <- array(NA,  c(length(FDR_levels),  length(methods), ncol(X_trans)),
+               dimnames=list(FDR_level=paste(FDR_levels), Method=methods, OTU=colnames(X)))
+
+obj1 <- latent_confounder_SDA_evalution(Beta_true=rep(0, ncol(X_trans)),  X_trans,  y_trans, ratio = 2/3,  fdrlevel = FDR_levels, K = 5)
+for (l  in  1: length(FDR_levels))
+{
+  res.a[l,  methods[1], ]  <- obj1$selection_result[,l]
+}
+
+obj2 <-  SDE_evalution(Beta_true,   X,  y,  fdrlevel = FDR_levels)
+for (l  in  1: length(FDR_levels))
+{
+  res.a[l,  methods[2], ]  <- obj2$selection_result[,l]
+}
+
+obj3 <-  MXKF_evalution(Beta_true, X, y, FDR = FDR_levels)
+for (l  in  1: length(FDR_levels))
+{
+  res.a[l,  methods[3], ]  <- obj3$selection_result[,l]
+}
+
+

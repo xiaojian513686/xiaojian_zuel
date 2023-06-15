@@ -1,0 +1,226 @@
+# Go from phyloseq object to something ready to input into trac
+
+library(Matrix)
+tara <- readRDS("D:/lunwen/lunwen_all/SDE_DDL/trac-reproducible-main/tara/original/tara_10.RDS")
+
+# Use salinity as outcome
+y <- sample_data(tara)$Mean_Salinity..PSU.
+summary(y)
+keep <- which(!is.na(sample_data(tara)$Mean_Salinity..PSU.))
+
+# Longhurst provinces in Longhurst
+sample_data(tara)$Marine.pelagic.biomes..Longhurst.2007.
+
+tax <- tara@tax_table@.Data
+dim(tax)
+# replace "unclassified" with the appropriate blank tag
+blank <- paste0(c("k", "p", "c", "o", "f", "g", "s"), "__")
+for (i in 1:7) tax[tax[, i] == "unclassified", i] <- blank[i]
+for (i in 1:7) tax[tax[, i] == "undef", i] <- blank[i]
+for (i in 1:7) tax[tax[, i] == "", i] <- blank[i]
+
+tax <- cbind("Life", tax); colnames(tax)[1] <- "Rank0"
+# add an OTU column
+tax <- cbind(tax, rownames(tax))
+colnames(tax)[ncol(tax)] <- "OTU"
+
+colnames(tax)[(colnames(tax) == "OTU.rep")] <- "Species"
+colnames(tax)[(colnames(tax) == "Domain")] <- "Kingdom"
+
+# make it so labels are unique
+for (i in seq(2, 8)) {
+  # add a number when the type is unknown... e.g. "g__"
+  ii <- nchar(tax[, i]) == 3
+  if (sum(ii) > 0)
+    tax[ii, i] <- paste0(tax[ii, i], 1:sum(ii))
+}
+
+# cumulative labels are harder to read but easier to work with:
+for (i in 2:9) {
+  tax[, i] <- paste(tax[, i-1], tax[, i], sep = "::")
+}
+tax <- as.data.frame(tax, stringsAsFactors = TRUE)
+
+# form phylo object:
+tree1 <- tax_table_to_phylo(~Rank0/Kingdom/Phylum/Class/Order/Family/Genus/Species/OTU,
+                            data = tax, collapse = TRUE)
+
+# convert this to an A matrix to be used for aggregation:
+A <- phylo_to_A(tree1)
+
+dat <- list(y = y[keep],
+            x = t(tara@otu_table@.Data)[keep,],
+            tree = tree1,
+            tax = tax,
+            A = A,
+            sample_data = as_tibble(sample_data(tara)[keep,]))
+# rows of A correspond to OTUs as do columns of x
+# rearrange columns of x to be in the order of rows of A:
+dat$x <- dat$x[, match(str_match(rownames(A), "::([^:]+)$")[, 2],
+                       colnames(dat$x))]
+identical(str_match(rownames(A), "::([^:]+)$")[,2],
+          colnames(dat$x))
+saveRDS(dat, file = "tara_sal_processed.RDS")
+
+########################################
+dim(dat$x)
+otu.tab <- dat$x
+otu.tab <- otu.tab + 1
+otu.prop <- otu.tab / rowSums(otu.tab)
+otu.composition <- otu.prop
+dim(otu.composition)
+X_trans <- log(otu.composition)
+dim(X_trans)
+y_trans <- dat$y
+hist(y_trans)
+# analysis:
+res.a <- array(0,  c(length(FDR_levels),  length(methods), ncol(X_trans)),
+               dimnames=list(FDR_level=paste(FDR_levels), Method=methods, OTU=colnames(X_trans)))
+
+set.seed(20)
+obj11 <- list()
+obj11 <- latent_confounder_SDA_evalution(Beta_true=rep(0, ncol(X_trans)), X_trans,  y_trans,  ratio = 2/3,  fdrlevel = FDR_levels, K = 5)
+for (l  in  1: length(FDR_levels))
+{
+  res.a[l,  methods[1], ]  <- obj11$selection_result[,l]
+}
+
+
+obj22 <-  SDE_evalution(Beta_true=rep(0, ncol(X_trans)),  X_trans,  y_trans,  fdrlevel = FDR_levels)
+for (l  in  1: length(FDR_levels))
+{
+  res.a[l,  methods[2], ]  <- obj22$selection_result[,l]
+}
+
+
+obj33 <-  MXKF_evalution(Beta_true=rep(0, ncol(X_trans[, ])), X_trans[, ],  y_trans, FDR = FDR_levels)
+for (l  in  1: length(FDR_levels))
+{
+  res.a[l,  methods[3], ]  <- 0
+}
+
+obj44 <- lfmm_evalution(Beta_true=rep(0, ncol(X_trans[, ])), X_trans[, ],  y_trans, fdrlevel  = FDR_levels)
+for (l  in  1: length(FDR_levels))
+{
+  res.a[l,  methods[4], ]  <- 0
+}
+
+
+saveRDS(res.a, file = "D:/lunwen/lunwen_all/SDE_DDL/trac-reproducible-main/tara/original/results_tara.RDS")
+
+##############################################plot the figure
+
+######=====================================================================================
+###### Source the different methods
+######=====================================================================================
+require(Rcpp);
+require(ape);
+require(dirmult);
+#require(ade4);
+require(cluster);
+require(Matrix);
+require(GUniFrac);
+require(ggplot2);
+#require(rFerns);
+require(reshape)
+require(plyr)
+
+
+#####################################
+mm <- matrix(NA, (length_w)*4, 3)
+colnames(mm) <- c("Method", "FDR_level", "Value")
+names <-  c("SDE-DDL", "SDE",  "MXKF")
+
+
+for (i in 1 : length_w)
+{
+  for (j in 1 : 3)
+  {	
+    mm[((i-1)*4+j), 1] <- names[j]
+    mm[((i-1)*4+j), 2] <- FDR_levels[i]
+    
+    if (j==1)
+    {
+      mm[((i-1)*4+j), 3] <- sum(res.a[i,  methods[1], ])
+    }
+    if (j==2)
+    {
+      mm[((i-1)*4+j), 3] <- sum(res.a[i,  methods[2], ])
+    }
+    if (j==3)
+    {
+      mm[((i-1)*4+j), 3] <-  sum(res.a[i,  methods[3], ])
+    }
+    if (j==4)
+    {
+      mm[((i-1)*4+j), 3] <-  sum(res.a[i,  methods[4], ])
+    }
+    
+    
+  }
+}
+
+res.df<-data.frame(mm)
+
+##############################################################################
+dat <- aggregate(Value ~ Method  + FDR_level, res.df, function(x) x)
+dat.n <- aggregate(Value ~ Method  + FDR_level, res.df, function(x) length(x))
+gg_color_hue <- function(n) {
+  hues = seq(15, 375, length=n+1)
+  hcl(h=hues, l=65, c=100)[1:n]
+}
+
+
+##res.df2 <- subset(dat,  Method %in% c("PTKAT",  "MiRKAT", "Kw", "Ku", "Kbc",  "K0", "K0.25", "K0.5", "K0.75") )
+res.df2 <- subset(dat,  Method %in% names )
+##& SNRs %in% seq(0,7,length=10)
+#
+res.df2$Method <- factor(res.df2$Method, levels=names)
+##
+levels(res.df2$Method) <- names 
+#
+##########################################labels
+#sparsity_names <- list('1'="Sparsity=1",'2'="Sparsity=2",'3'="Sparsity=3")
+#aboundance_names <- list('1'="Aboundance=1",'2'="Aboundance=2",'3'="Aboundance=3")
+#plot_labeller <- function(variable,value){
+#	if (variable=='Sparsity') {
+#		return(sparsity_names[value])
+#	} else {
+#		return(aboundance_names[value])
+#	}
+#}
+dev.new()
+
+
+##########kx???
+plot(res.df2[which(res.df2$Method=="SDE-DDL"), ]$FDR_level,res.df2[which(res.df2$Method=="SDE-DDL"), ]$Value,ylab="Number of identified microbiome taxa",xlab="FDR level",
+     col="purple", ylim = c(-1, 7), type = 'b',lwd = 2, main = "Feature selection results", pch="r")
+########?????V\??
+lines(res.df2[which(res.df2$Method=="SDE"), ]$FDR_level,  res.df2[which(res.df2$Method=="SDE"), ]$Value,  type = 'b',col = 'red',lwd = 2,pch="*")
+#############x???~
+#############x???~
+#############x???~
+lines(res.df2[which(res.df2$Method=="MXKF"), ]$FDR_level,  res.df2[which(res.df2$Method=="MXKF"), ]$Value,  type = 'b',col = 'brown',lwd = 2,pch="o")
+
+lines(res.df2[which(res.df2$Method=="LFMM"), ]$FDR_level,  res.df2[which(res.df2$Method=="LFMM"), ]$Value,  type = 'b',col = 'blue',lwd = 2,pch="+")
+#############x???~
+
+#############x???~
+
+lbl <-  c("SDE-DDL", "SDE",  "MXKF","LFMM")
+legend("topleft", lbl, cex = 0.9,pch=c("r","*", "o","+"))
+########################################Ԥ
+index_selection <- which(obj11$selection_result[,10]!=0)
+otu_selection_information <- tax[colnames(X_trans)[index_selection],]
+
+library(xtable)
+xtable(t(otu_selection_information),  caption="Selected taxa by SDE-DDL")
+
+
+
+
+
+
+
+
+
