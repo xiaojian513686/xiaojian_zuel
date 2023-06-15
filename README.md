@@ -1,4 +1,4 @@
-You can found and download the two different environment packages "SDEDDL_1.0.2.zip"  and "SDEDDL_1.0.2.tar.gz".
+You can  download the two different environment packages "SDEDDL_1.0.2.zip"  and "SDEDDL_1.0.2.tar.gz".
 We illustrate the usage of the package "SDEDDL" by an example.
 
 
