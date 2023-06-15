@@ -7,9 +7,7 @@ The packages published by Jian  Xiao.
 
 Package: SDEDDL, spectral deconfounding estimation SDE and Doubly Debiased Lasso (DDL)
 
-Description: a novel FDR controlled latent confounders-adjusted feature 
-
-selection framework for omics-wide complex association studies.
+Description: a novel FDR controlled latent confounders-adjusted feature selection framework for omics-wide complex association studies.
 
 Version: 1.0.2
 
@@ -33,12 +31,10 @@ Reference manual: SDEDDL.pdf
 
 ###################################################################################
 
-Title: FDR controlled omics feature selection method by spertral 
+Title: FDR controlled omics feature selection method by spertral deconfounding estimation (SDE) and double diabased lasso estimation method (DDL)
 
-deconfounding estimation (SDE) and double diabased lasso estimation method 
-
-(DDL)
 #####################################################################################
+
 Usage 
 
 SDEDDL(X, Y, ratio = 2/3, fdrlevel = c(0.05,0.1), K = 5) 
@@ -54,6 +50,7 @@ k: the repeat times of sample-splitting, default setting is 5.
 return: a list including the omics feature selection result at the different FDR levels.
 
 ######################################################################################
+
 Step 1： install the packages SDEDDL by using the two different packages "SDEDDL_1.0.2.zip"  and "SDEDDL_1.0.2.tar.gz".
 
 Step 2: library(SDEDDL)
@@ -105,4 +102,5 @@ Y = X %*% beta + H %*% delta + nu
 result = SDEDDL(X, Y)
 
 summary(result)
+
 #####################################################################
